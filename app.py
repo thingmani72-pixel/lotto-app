@@ -1,132 +1,80 @@
 import streamlit as st
-import sqlite3
+import pandas as pd
 import random
-import requests
-import time
+from collections import Counter
 
-# 1. DB 연결 상태를 유지하기 위한 캐싱
-@st.cache_resource
-def get_db_connection():
-    conn = sqlite3.connect("lotto_history.db", check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS winning_numbers (
-            draw_no INTEGER PRIMARY KEY,
-            n1 INTEGER, n2 INTEGER, n3 INTEGER,
-            n4 INTEGER, n5 INTEGER, n6 INTEGER
-        )
-    ''')
-    conn.commit()
-    return conn
-
-# 2. 동행복권 API로 당첨 번호 수집 (에러 방지 적용)
-def update_db(conn, target_draws):
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(draw_no) FROM winning_numbers")
-    last_saved = cursor.fetchone()[0]
+# 엑셀 파일 데이터 불러오기 (캐싱하여 속도 최적화)
+@st.cache_data
+def load_lotto_data():
+    # 엑셀 파일 읽기
+    df = pd.read_excel("lotto.xlsx")
     
-    start_draw = (last_saved + 1) if last_saved else 1
+    # 1. 역대 당첨 조합 리스트 만들기 (빠른 대조를 위해 Set 사용)
+    winning_combinations = set(
+        tuple(sorted([row['번호1'], row['번호2'], row['번호3'], row['번호4'], row['번호5'], row['번호6']]))
+        for _, row in df.iterrows()
+    )
     
-    if start_draw > target_draws:
-        st.info("이미 최신 회차까지 데이터베이스가 업데이트되어 있습니다.")
-        return 0
-
-    st.write(f"{start_draw}회차부터 {target_draws}회차까지 수집을 시작합니다...")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    saved_count = 0
-    total_to_fetch = target_draws - start_draw + 1
-    
-    # 웹 브라우저처럼 보이게 하는 헤더 설정
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    
-    for i, draw_no in enumerate(range(start_draw, target_draws + 1)):
-        url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={draw_no}"
+    # 2. 모든 당첨 번호 추출하여 빈도 분석
+    all_numbers = []
+    for col in ['번호1', '번호2', '번호3', '번호4', '번호5', '번호6']:
+        all_numbers.extend(df[col].tolist())
         
-        # --- 예외 처리 적용 부분 ---
-        try:
-            # 5초 이상 응답이 없으면 타임아웃 에러를 발생시킴
-            response = requests.get(url, headers=headers, timeout=5).json()
-        except requests.exceptions.RequestException:
-            st.error(f"동행복권 서버 접속에 실패했습니다. (해외망 차단 등) 수집을 중단합니다.")
-            break # 에러 발생 시 반복문을 빠져나와 앱 다운 방지
-        # ------------------------
-        
-        if response.get("returnValue") == "success":
-            nums = sorted([response[f"drwtNo{j}"] for j in range(1, 7)])
-            cursor.execute('''
-                INSERT OR IGNORE INTO winning_numbers (draw_no, n1, n2, n3, n4, n5, n6)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (draw_no, nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]))
-            saved_count += 1
+    freq = Counter(all_numbers)
+    for i in range(1, 46):
+        if i not in freq:
+            freq[i] = 0
             
-        progress_bar.progress((i + 1) / total_to_fetch)
-        status_text.text(f"진행 상황: {draw_no}회차 저장 중... ({(i+1)/total_to_fetch*100:.1f}%)")
-        time.sleep(0.1) 
-        
-    conn.commit()
-    progress_bar.empty()
-    status_text.empty()
-    return saved_count
+    return df, winning_combinations, freq
 
-# 3. 미당첨 번호 생성 함수
-def generate_undrawn_numbers(conn):
-    cursor = conn.cursor()
+# 미당첨 조합 생성 함수
+def generate_undrawn(winning_combinations, pool_numbers):
     attempts = 0
-    
     while True:
         attempts += 1
-        candidate = tuple(sorted(random.sample(range(1, 46), 6)))
-        
-        cursor.execute('''
-            SELECT draw_no FROM winning_numbers 
-            WHERE n1=? AND n2=? AND n3=? AND n4=? AND n5=? AND n6=?
-        ''', candidate)
-        
-        if not cursor.fetchone():
+        candidate = tuple(sorted(random.sample(pool_numbers, 6)))
+        if candidate not in winning_combinations:
             return candidate, attempts
 
-# --- Streamlit UI 구성 ---
-st.set_page_config(page_title="로또 미당첨 번호 추천기", page_icon="🍀")
+# --- Streamlit UI ---
+st.set_page_config(page_title="엑셀 기반 로또 분석기", page_icon="📈")
 
-st.title("🍀 로또 미당첨 조합 생성기")
-st.write("역대 1등 당첨 기록과 대조하여, **단 한 번도 나온 적 없는 새로운 번호 조합**을 추출합니다.")
+st.title("📈 통계 기반 로또 미당첨 번호 추천기")
+st.write("첨부된 `lotto.xlsx` 파일의 역대 당첨 기록을 분석하여 새로운 번호를 추출합니다.")
 
-db_conn = get_db_connection()
-
-with st.sidebar:
-    st.header("⚙️ 데이터베이스 관리")
-    st.write("로또 API 서버에서 당첨 기록을 가져옵니다.")
-    target_draw_input = st.number_input("수집할 목표 회차", min_value=1, max_value=3000, value=1240)
+try:
+    df, winning_combinations, freq = load_lotto_data()
+    total_draws = len(df)
+    st.info(f"성공적으로 데이터를 불러왔습니다. (총 {total_draws}회차 분석 완료)")
     
-    if st.button("DB 업데이트 실행"):
-        with st.spinner("데이터를 수집하는 중입니다..."):
-            new_records = update_db(db_conn, target_draw_input)
-            if new_records > 0:
-                st.success(f"{new_records}개의 새로운 당첨 기록을 DB에 추가했습니다!")
-            else:
-                st.info("추가된 새로운 당첨 기록이 없습니다.")
-
-st.markdown("---")
-st.subheader("새로운 운명의 번호 뽑기")
-
-if st.button("🚀 번호 생성하기", use_container_width=True):
-    cursor = db_conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM winning_numbers")
-    if cursor.fetchone()[0] == 0:
-        st.warning("왼쪽 사이드바에서 먼저 'DB 업데이트 실행'을 눌러 과거 데이터를 가져와주세요.")
-    else:
-        with st.spinner("과거 기록과 대조하며 미당첨 번호를 찾는 중..."):
-            new_lotto_numbers, tries = generate_undrawn_numbers(db_conn)
+    # 통계 추출
+    most_common = freq.most_common(6) # 가장 많이 나온 6개
+    least_common = freq.most_common()[:-7:-1] # 가장 적게 나온 6개
+    
+    hot_numbers = [num for num, count in most_common]
+    cold_numbers = [num for num, count in least_common]
+    pool = list(set(hot_numbers + cold_numbers))
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.success(f"🔥 역대 최다 출현 숫자 6개:\n{hot_numbers}")
+    with col2:
+        st.info(f"❄️ 역대 최소 출현 숫자 6개:\n{cold_numbers}")
+        
+    st.markdown("---")
+    
+    if st.button("🚀 위 숫자들을 조합하여 새 번호 뽑기", use_container_width=True):
+        with st.spinner("미당첨 조합을 찾는 중..."):
+            new_numbers, tries = generate_undrawn(winning_combinations, pool)
             
-            st.success("새로운 미당첨 번호를 찾았습니다!")
-            
+            st.success("역대 1등 번호와 겹치지 않는 새로운 조합입니다!")
             cols = st.columns(6)
-            for i, num in enumerate(new_lotto_numbers):
+            for i, num in enumerate(new_numbers):
                 cols[i].markdown(
                     f"<div style='text-align:center; padding:20px; background-color:#f0f2f6; border-radius:50%; font-size:24px; font-weight:bold;'>{num}</div>", 
                     unsafe_allow_html=True
                 )
+            st.caption(f"내부 탐색 횟수: {tries}번")
             
-            st.caption(f"이 번호를 찾기 위해 내부적으로 {tries}번의 난수 생성과 대조를 반복했습니다.")
+except FileNotFoundError:
+    st.error("같은 폴더에 'lotto.xlsx' 파일이 없습니다. 파일을 준비해 주세요.")
