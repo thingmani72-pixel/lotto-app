@@ -4,10 +4,9 @@ import random
 import requests
 import time
 
-# 1. DB 연결 상태를 유지하기 위한 캐싱 (Streamlit 재실행 시마다 연결 방지)
+# 1. DB 연결 상태를 유지하기 위한 캐싱
 @st.cache_resource
 def get_db_connection():
-    # check_same_thread=False: 여러 스레드(Streamlit 렌더링)에서 동일 DB 접근 허용
     conn = sqlite3.connect("lotto_history.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
@@ -20,7 +19,7 @@ def get_db_connection():
     conn.commit()
     return conn
 
-# 2. 동행복권 API로 당첨 번호 수집 (프로그레스 바 UI 포함)
+# 2. 동행복권 API로 당첨 번호 수집 (에러 방지 적용)
 def update_db(conn, target_draws):
     cursor = conn.cursor()
     cursor.execute("SELECT MAX(draw_no) FROM winning_numbers")
@@ -39,9 +38,20 @@ def update_db(conn, target_draws):
     saved_count = 0
     total_to_fetch = target_draws - start_draw + 1
     
+    # 웹 브라우저처럼 보이게 하는 헤더 설정
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
     for i, draw_no in enumerate(range(start_draw, target_draws + 1)):
         url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={draw_no}"
-        response = requests.get(url).json()
+        
+        # --- 예외 처리 적용 부분 ---
+        try:
+            # 5초 이상 응답이 없으면 타임아웃 에러를 발생시킴
+            response = requests.get(url, headers=headers, timeout=5).json()
+        except requests.exceptions.RequestException:
+            st.error(f"동행복권 서버 접속에 실패했습니다. (해외망 차단 등) 수집을 중단합니다.")
+            break # 에러 발생 시 반복문을 빠져나와 앱 다운 방지
+        # ------------------------
         
         if response.get("returnValue") == "success":
             nums = sorted([response[f"drwtNo{j}"] for j in range(1, 7)])
@@ -51,10 +61,9 @@ def update_db(conn, target_draws):
             ''', (draw_no, nums[0], nums[1], nums[2], nums[3], nums[4], nums[5]))
             saved_count += 1
             
-        # UI 업데이트
         progress_bar.progress((i + 1) / total_to_fetch)
         status_text.text(f"진행 상황: {draw_no}회차 저장 중... ({(i+1)/total_to_fetch*100:.1f}%)")
-        time.sleep(0.1) # API 차단 방지용 대기
+        time.sleep(0.1) 
         
     conn.commit()
     progress_bar.empty()
@@ -86,25 +95,23 @@ st.write("역대 1등 당첨 기록과 대조하여, **단 한 번도 나온 적
 
 db_conn = get_db_connection()
 
-# 사이드바: DB 관리
 with st.sidebar:
     st.header("⚙️ 데이터베이스 관리")
     st.write("로또 API 서버에서 당첨 기록을 가져옵니다.")
-    # 테스트를 위해 기본값을 100으로 설정 (실제로는 1240 등 최신 회차로 입력)
-    target_draw_input = st.number_input("수집할 목표 회차", min_value=1, max_value=2000, value=100)
+    target_draw_input = st.number_input("수집할 목표 회차", min_value=1, max_value=3000, value=1240)
     
     if st.button("DB 업데이트 실행"):
         with st.spinner("데이터를 수집하는 중입니다..."):
             new_records = update_db(db_conn, target_draw_input)
             if new_records > 0:
                 st.success(f"{new_records}개의 새로운 당첨 기록을 DB에 추가했습니다!")
+            else:
+                st.info("추가된 새로운 당첨 기록이 없습니다.")
 
-# 메인 화면: 번호 생성
 st.markdown("---")
 st.subheader("새로운 운명의 번호 뽑기")
 
 if st.button("🚀 번호 생성하기", use_container_width=True):
-    # DB에 데이터가 하나라도 있는지 확인
     cursor = db_conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM winning_numbers")
     if cursor.fetchone()[0] == 0:
@@ -115,7 +122,6 @@ if st.button("🚀 번호 생성하기", use_container_width=True):
             
             st.success("새로운 미당첨 번호를 찾았습니다!")
             
-            # 번호를 보기 좋게 시각화
             cols = st.columns(6)
             for i, num in enumerate(new_lotto_numbers):
                 cols[i].markdown(
