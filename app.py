@@ -8,6 +8,10 @@ from collections import Counter
 def load_lotto_data():
     df = pd.read_excel("lotto.xlsx")
     
+    # 💡 핵심 수정: 엑셀 데이터가 어떻게 입력되어 있든, '회차' 번호순으로 
+    # 과거에서 최신순(오름차순)으로 자동 정렬하여 인식 오류를 원천 차단합니다.
+    df = df.sort_values(by='회차').reset_index(drop=True)
+    
     # 1. 역대 당첨 조합 (중복 방지용)
     winning_combinations = set(
         tuple(sorted([row['번호1'], row['번호2'], row['번호3'], row['번호4'], row['번호5'], row['번호6']]))
@@ -24,7 +28,7 @@ def load_lotto_data():
         if i not in freq:
             freq[i] = 0
             
-    # 3. 직전 회차 번호 식별 (이월수 배제용)
+    # 3. 직전 회차 번호 식별 (이월수 배제용 - 정렬되었으므로 무조건 최신 회차가 맨 아래 위치)
     last_draw_row = df.iloc[-1]
     last_draw_no = int(last_draw_row['회차'])
     last_draw_numbers = set([
@@ -32,7 +36,7 @@ def load_lotto_data():
         int(last_draw_row['번호4']), int(last_draw_row['번호5']), int(last_draw_row['번호6'])
     ])
     
-    # 4. 💡 최근 10주 미출현 콜드 번호 식별 (가중치 3배 증폭용)
+    # 4. 최근 10주 미출현 콜드 번호 식별 (가중치 3배 증폭용 - 최신 10개 행 추출)
     recent_10_df = df.tail(10)
     recent_10_numbers = set()
     for col in ['번호1', '번호2', '번호3', '번호4', '번호5', '번호6']:
@@ -52,9 +56,7 @@ def get_weighted_sample(pool, freq_dict, cold_nums, k):
             
         weights = []
         for x in current_pool:
-            # 기본 가중치는 역대 당첨 횟수
             w = freq_dict[x]
-            # 💡 만약 최근 10주 미출현 콜드 번호라면 가중치를 3배(300%)로 증폭
             if x in cold_nums:
                 w *= 3.0 
             weights.append(w)
@@ -85,6 +87,8 @@ def generate_weighted_smart_multiple(winning_combinations, freq_dict, exclude_nu
         # 2. 25% 확률로 10~19번에서 시작
         else:
             pool_10_19 = [x for x in range(10, 20) if x not in exclude_nums]
+            if not pool_10_19: 
+                continue
             first_num = get_weighted_sample(pool_10_19, freq_dict, cold_nums, 1).pop()
             combo = {first_num}
             
@@ -115,9 +119,8 @@ try:
     
     st.info(f"✅ 총 {total_draws}회차 데이터 기반 4중 필터링 엔진 가동 중")
     
-    # 화면에 제외수와 콜드수 안내 추가
-    st.warning(f"🚫 직전 {last_draw_no}회차 당첨 번호 {sorted(list(last_draw_numbers))} 6개는 추출에서 완전 제외되었습니다.")
-    st.success(f"🧊 최근 10주 미출현 콜드 번호 {len(cold_numbers)}개 발굴 완료! (추출 가중치 300% 적용)\n{sorted(list(cold_numbers))}")
+    st.warning(f"🚫 직전 **{last_draw_no}회차 당첨 번호 {sorted(list(last_draw_numbers))}** 6개는 추출에서 완전 제외되었습니다.")
+    st.success(f"🧊 **{last_draw_no-9}회~{last_draw_no}회** 미출현 콜드 번호 {len(cold_numbers)}개 발굴 완료! (가중치 300% 적용)\n{sorted(list(cold_numbers))}")
         
     st.markdown("---")
     
