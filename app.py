@@ -8,13 +8,11 @@ from collections import Counter
 def load_lotto_data():
     df = pd.read_excel("lotto.xlsx")
     
-    # 1. 역대 당첨 조합 리스트 만들기
     winning_combinations = set(
         tuple(sorted([row['번호1'], row['번호2'], row['번호3'], row['번호4'], row['번호5'], row['번호6']]))
         for _, row in df.iterrows()
     )
     
-    # 2. 모든 당첨 번호 추출하여 빈도 분석
     all_numbers = []
     for col in ['번호1', '번호2', '번호3', '번호4', '번호5', '번호6']:
         all_numbers.extend(df[col].tolist())
@@ -26,35 +24,52 @@ def load_lotto_data():
             
     return df, winning_combinations, freq
 
-# 💡 대화 내용을 바탕으로 업그레이드된 통계 기반 생성 알고리즘
-def generate_smart_multiple(winning_combinations, num_games):
+# 💡 가중치(Weight) 기반 무작위 추출 함수 추가
+def get_weighted_sample(pool, freq_dict, k):
+    picked = set()
+    while len(picked) < k:
+        # 아직 뽑히지 않은 남은 번호들만 모아서 후보군 생성
+        current_pool = [x for x in pool if x not in picked]
+        # 후보군 번호들의 역대 당첨 횟수를 가중치(확률)로 설정
+        weights = [freq_dict[x] for x in current_pool]
+        
+        # 가중치를 적용하여 1개씩 추출
+        choice = random.choices(current_pool, weights=weights, k=1)[0]
+        picked.add(choice)
+    return picked
+
+# 💡 황금 패턴 + 출현 비율 가중치 결합 알고리즘
+def generate_weighted_smart_multiple(winning_combinations, freq_dict, num_games):
     results = []
     attempts = 0
     
     while len(results) < num_games:
         attempts += 1
         
-        # 75% 확률로 1~9번에서 시작하는 패턴 적용
+        # 1. 75% 확률로 1~9번에서 시작하는 패턴
         if random.random() < 0.75:
-            # 발견하신 통계대로 1~9번 구간에서 1개 또는 2개만 추출
             single_count = random.choice([1, 2])
-            combo = set(random.sample(range(1, 10), single_count))
+            pool_1_9 = list(range(1, 10))
+            # 1~9번 안에서도 자주 나온 번호 위주로 추출
+            combo = get_weighted_sample(pool_1_9, freq_dict, single_count)
             
-            # 나머지 번호는 10~45번 구간에서 추출하여 총 6개 완성
-            combo.update(random.sample(range(10, 46), 6 - single_count))
+            # 나머지 10~45번 구간에서도 자주 나온 번호 위주로 추출
+            pool_10_45 = list(range(10, 46))
+            combo.update(get_weighted_sample(pool_10_45, freq_dict, 6 - single_count))
             
-        # 25% 확률로 10~19번에서 시작하는 패턴 적용
+        # 2. 25% 확률로 10~19번에서 시작하는 패턴
         else:
-            first_num = random.randint(10, 19)
-            combo = set([first_num])
+            pool_10_19 = list(range(10, 20))
+            # 10~19번 안에서 시작 번호 1개를 가중치로 추출
+            first_num = get_weighted_sample(pool_10_19, freq_dict, 1).pop()
+            combo = {first_num}
             
-            # 나머지 5개는 시작 번호보다 큰 숫자 중에서 추출 (단번대 배제)
-            pool = list(range(first_num + 1, 46))
-            combo.update(random.sample(pool, 5))
+            # 나머지 5개는 시작 번호보다 큰 숫자 중에서 가중치로 추출
+            pool_rest = list(range(first_num + 1, 46))
+            combo.update(get_weighted_sample(pool_rest, freq_dict, 5))
             
         candidate = tuple(sorted(combo))
         
-        # 역대 1등 번호와 겹치지 않고, 이번에 뽑은 다른 게임과도 중복되지 않아야 통과
         if candidate not in winning_combinations and candidate not in results:
             results.append(candidate)
             
@@ -68,36 +83,33 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.set_page_config(page_title="최적화 로또 분석기", page_icon="🎯")
-st.title("🎯 최적화 통계 기반 로또 생성기")
-st.write("발견하신 **'시작 번호 패턴(단번대 1~2개)'**을 적용하여, 역대 1등과 겹치지 않는 가장 확률 높은 번호를 추출합니다.")
+st.title("🎯 가중치 + 패턴 기반 로또 생성기")
+st.write("발견하신 **'시작 번호 황금 패턴'**을 지키면서, 과거에 **자주 당첨된 번호일수록 새 조합에 더 높은 확률로 포함**되도록 2중 설계되었습니다.")
 
 try:
     df, winning_combinations, freq = load_lotto_data()
     total_draws = len(df)
-    st.info(f"✅ 총 {total_draws}회차 데이터 분석 완료 및 패턴 알고리즘 가동 중")
+    st.info(f"✅ 총 {total_draws}회차 데이터 분석 및 가중치(Weight) 엔진 가동 중")
     
-    # 핫/콜드 번호 통계 표시
     most_common = freq.most_common(6)
     least_common = freq.most_common()[:-7:-1]
     
     col1, col2 = st.columns(2)
     with col1:
-        st.success(f"🔥 역대 최다 출현 6개:\n{[num for num, _ in most_common]}")
+        st.success(f"🔥 역대 최다 출현 6개 (가중치 높음):\n{[num for num, _ in most_common]}")
     with col2:
-        st.info(f"❄️ 역대 최소 출현 6개:\n{[num for num, _ in least_common]}")
+        st.info(f"❄️ 역대 최소 출현 6개 (가중치 낮음):\n{[num for num, _ in least_common]}")
         
     st.markdown("---")
     
-    # 1~10게임 한 번에 선택받기
     num_to_generate = st.selectbox("몇 게임을 생성할까요?", range(1, 11), index=4)
     
-    if st.button(f"🚀 {num_to_generate}게임 황금 패턴으로 뽑기", use_container_width=True):
-        with st.spinner("최적의 미당첨 조합을 찾는 중..."):
-            new_combinations, tries = generate_smart_multiple(winning_combinations, num_to_generate)
+    if st.button(f"🚀 {num_to_generate}게임 최적 조합으로 뽑기", use_container_width=True):
+        with st.spinner("비율 가중치를 계산하며 미당첨 조합을 찾는 중..."):
+            new_combinations, tries = generate_weighted_smart_multiple(winning_combinations, freq, num_to_generate)
             
-            st.success("✨ 역대 1등 번호를 완벽히 피해간 최적의 패턴 조합입니다!")
+            st.success("✨ 출현 비율과 패턴을 모두 만족하는 최적의 조합입니다!")
             
-            # 생성된 게임 화면에 출력 (동행복권 색상 적용)
             for j, new_numbers in enumerate(new_combinations):
                 st.markdown(f"**[{j+1} 게임]**")
                 cols = st.columns(6)
@@ -115,7 +127,7 @@ try:
                     )
                 st.markdown("---")
                 
-            st.caption(f"내부 탐색 및 필터링 횟수: 총 {tries}번")
+            st.caption(f"가중치 연산 및 필터링 횟수: 총 {tries}번")
             
 except FileNotFoundError:
     st.error("같은 폴더에 'lotto.xlsx' 파일이 없습니다. 파일을 준비해 주세요.")
