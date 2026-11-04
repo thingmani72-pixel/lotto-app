@@ -57,7 +57,6 @@ def get_weighted_sample(pool, freq_dict, cold_nums, k):
         picked.add(choice)
     return picked
 
-# 💡 10중 극한 필터 통합 알고리즘
 def generate_weighted_smart_multiple(winning_combinations, freq_dict, exclude_nums, cold_nums, num_games, 
                                      min_sum, max_sum, allowed_odd_counts, 
                                      use_consec, use_same_last, use_empty_sec, use_max_2_per_line):
@@ -67,7 +66,6 @@ def generate_weighted_smart_multiple(winning_combinations, freq_dict, exclude_nu
     while len(results) < num_games:
         attempts += 1
         
-        # 시작 패턴 강제
         if random.random() < 0.75:
             single_count = random.choice([1, 2])
             pool_1_9 = [x for x in range(1, 10) if x not in exclude_nums]
@@ -86,21 +84,17 @@ def generate_weighted_smart_multiple(winning_combinations, freq_dict, exclude_nu
         candidate = tuple(sorted(combo))
         
         if candidate not in winning_combinations and candidate not in results and len(candidate) == 6:
-            # 1. 총합 & 홀짝 필터
             if not (min_sum <= sum(candidate) <= max_sum and sum(1 for x in candidate if x % 2 != 0) in allowed_odd_counts):
                 continue
                 
-            # 💡 2. 고급 필터: 연속수 (예: 14, 15) 1쌍 이상 포함
             if use_consec:
                 has_consec = any(candidate[i] + 1 == candidate[i+1] for i in range(5))
                 if not has_consec: continue
                     
-            # 💡 3. 고급 필터: 동일 끝수 (예: 12, 32) 1쌍 이상 포함
             if use_same_last:
                 last_digits = [x % 10 for x in candidate]
-                if len(set(last_digits)) == 6: continue # 6개 끝수가 모두 다르면 탈락
+                if len(set(last_digits)) == 6: continue
                 
-            # 💡 4. 고급 필터: 멸구간 (단번/10/20/30/40번대 중 최소 1개 구간 전멸)
             if use_empty_sec:
                 sections = set()
                 for x in candidate:
@@ -109,13 +103,11 @@ def generate_weighted_smart_multiple(winning_combinations, freq_dict, exclude_nu
                     elif x < 30: sections.add(2)
                     elif x < 40: sections.add(3)
                     else: sections.add(4)
-                if len(sections) == 5: continue # 5개 구간에 숫자가 모두 있으면(멸구간이 없으면) 탈락
+                if len(sections) == 5: continue
                 
-            # 💡 5. 고급 필터: 용지 가로줄당(7개 단위) 최대 2개까지만 마킹
             if use_max_2_per_line:
-                # 1~7번=0줄, 8~14번=1줄 ... 43~45번=6줄
                 line_counts = Counter((x - 1) // 7 for x in candidate)
-                if max(line_counts.values()) > 2: continue # 한 줄에 3개 이상 쏠리면 탈락
+                if max(line_counts.values()) > 2: continue
                 
             results.append(candidate)
             
@@ -164,16 +156,16 @@ try:
     st.caption("실제 1등 당첨 번호의 약 60~70%가 가지는 패턴들입니다. (체크 시 활성화)")
     
     col5, col6, col7, col8 = st.columns(4)
-    with col5: use_consec = st.checkbox("연속수 1쌍 이상 포함", value=True, help="예: 14, 15처럼 이어진 번호 발생")
-    with col6: use_same_last = st.checkbox("동일 끝수 1쌍 이상 포함", value=True, help="예: 12, 32처럼 끝자리가 같은 번호 발생")
-    with col7: use_empty_sec = st.checkbox("멸구간 최소 1개 발생", value=True, help="단번/10/20/30/40번대 중 최소 1구간은 번호가 안 나옴")
-    with col8: use_max_2_per_line = st.checkbox("용지 가로줄당 최대 2개", value=True, help="마킹 시 한 줄에 3개 이상 찍히는 쏠림 방지")
+    with col5: use_consec = st.checkbox("연속수 1쌍 이상 포함", value=True)
+    with col6: use_same_last = st.checkbox("동일 끝수 1쌍 이상 포함", value=True)
+    with col7: use_empty_sec = st.checkbox("멸구간 최소 1개 발생", value=True)
+    with col8: use_max_2_per_line = st.checkbox("용지 가로줄당 최대 2개", value=True)
         
     st.markdown("---")
     num_to_generate = st.selectbox("몇 게임을 생성할까요?", range(1, 11), index=4)
     
     if st.button(f"🚀 {num_to_generate}게임 최적 조합으로 뽑기", use_container_width=True):
-        with st.spinner("수만 번의 시뮬레이션을 거쳐 허수 조합을 폐기하는 중... (필터가 많을수록 약간의 시간이 소요될 수 있습니다)"):
+        with st.spinner("수만 번의 시뮬레이션을 거쳐 허수 조합을 폐기하는 중..."):
             new_combinations, tries = generate_weighted_smart_multiple(
                 winning_combinations, freq, last_draw_numbers, cold_numbers, 
                 num_to_generate, min_s, max_s, ratio_options,
@@ -189,6 +181,7 @@ try:
                 st.markdown(f"**[{j+1} 게임]** (총합: {total_sum} / 홀짝: {odd_count}:{6-odd_count})")
                 cols = st.columns(6)
                 
+                # 1. 시각적인 컬러 공 출력
                 for i, num in enumerate(new_numbers):
                     if num <= 10: bg_color, text_color = "#fbc400", "#000000"
                     elif num <= 20: bg_color, text_color = "#69c8f2", "#000000"
@@ -200,6 +193,11 @@ try:
                         f"<div style='text-align:center; padding:15px; margin-bottom:10px; background-color:{bg_color}; color:{text_color}; border-radius:50%; font-size:20px; font-weight:bold; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);'>{num}</div>", 
                         unsafe_allow_html=True
                     )
+                
+                # 💡 2. 복사하기 쉬운 텍스트 박스 출력 (우측 상단에 복사 버튼 자동 생성)
+                num_string = ", ".join(str(x) for x in new_numbers)
+                st.code(num_string, language="text")
+                
                 st.markdown("---")
             
 except FileNotFoundError:
