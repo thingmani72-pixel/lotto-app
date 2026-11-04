@@ -208,4 +208,5 @@ try:
             st.caption("아래 박스 우측 상단의 겹친 네모 아이콘(Copy)을 누르면 전체 게임이 한 번에 복사됩니다.")
             st.code(all_games_text.strip(), language="text")
             
-except FileNotFoundError
+except FileNotFoundError:
+    st.error("같은 폴더에 'lotto.xlsx' 파일이 없습니다. 파일을 준비해 주세요.")
