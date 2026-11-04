@@ -174,6 +174,9 @@ try:
             
             st.success(f"✨ 허수 조합 폐기 및 조건 탐색 횟수: 총 **{tries:,}번** 연산 완료!")
             
+            # 💡 일괄 복사를 위한 텍스트 저장용 변수
+            all_games_text = ""
+            
             for j, new_numbers in enumerate(new_combinations):
                 total_sum = sum(new_numbers)
                 odd_count = sum(1 for x in new_numbers if x % 2 != 0)
@@ -181,7 +184,7 @@ try:
                 st.markdown(f"**[{j+1} 게임]** (총합: {total_sum} / 홀짝: {odd_count}:{6-odd_count})")
                 cols = st.columns(6)
                 
-                # 1. 시각적인 컬러 공 출력
+                # 시각적인 컬러 공 출력
                 for i, num in enumerate(new_numbers):
                     if num <= 10: bg_color, text_color = "#fbc400", "#000000"
                     elif num <= 20: bg_color, text_color = "#69c8f2", "#000000"
@@ -194,11 +197,15 @@ try:
                         unsafe_allow_html=True
                     )
                 
-                # 💡 2. 복사하기 쉬운 텍스트 박스 출력 (우측 상단에 복사 버튼 자동 생성)
+                # 전체 복사용 텍스트 누적
                 num_string = ", ".join(str(x) for x in new_numbers)
-                st.code(num_string, language="text")
+                all_games_text += f"[{j+1}게임] {num_string}\n"
                 
                 st.markdown("---")
+                
+            # 💡 하단에 전체 복사 전용 UI 추가
+            st.markdown("### 📋 전체 번호 일괄 복사")
+            st.caption("아래 박스 우측 상단의 겹친 네모 아이콘(Copy)을 누르면 전체 게임이 한 번에 복사됩니다.")
+            st.code(all_games_text.strip(), language="text")
             
-except FileNotFoundError:
-    st.error("같은 폴더에 'lotto.xlsx' 파일이 없습니다. 파일을 준비해 주세요.")
+except FileNotFoundError
